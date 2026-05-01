@@ -9,6 +9,7 @@ Qanoon server is legally compliant, safe and ethical AI that can draft legal doc
 ## Demo Video
 
 ## Architecture Diagram
+![Architecture Diagram](<data/Architecture Diagram.jpeg>)
 
 
 ## How to Compile
