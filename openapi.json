@@ -1,0 +1,282 @@
+
+{
+  "openapi": "1.0.0",
+  "info": {
+    "title": "Qanoon-AI Sandbox Backend API",
+    "description": "Localized, privacy-first REST API backend orchestrating local document ingestion, PII redaction, semantic vector search, and local asynchronous streaming LLM generation.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000/api/v1",
+      "description": "Local Tauri Sidecar Instance"
+    }
+  ],
+  "paths": {
+    "/documents/ingest": {
+      "post": {
+        "summary": "Ingest and Parse Document",
+        "description": "Accepts PDF, DOCX, or TXT legal files, extracts plaintext, and performs an initial document metadata assessment entirely offline.",
+        "operationId": "ingestDocument",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The legal file to parse (Max 50MB)"
+                  }
+                },
+                "required": ["file"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document parsed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentIngestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported file format or corruption"
+          }
+        }
+      }
+    },
+    "/redact/sanitize": {
+      "post": {
+        "summary": "Sanitize Legal Text (Presidio Firewall)",
+        "description": "Analyzes legal text for Personally Identifiable Information (PII) using local Microsoft Presidio engines and masks entities before routing to local LLM context.",
+        "operationId": "sanitizeText",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedactionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Text scanned and sanitized successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedactionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/search": {
+      "post": {
+        "summary": "Query Local Statutory Knowledge Base",
+        "description": "Performs a localized semantic vector search across cached laws, constitutional articles, and legal precedents to locate citations.",
+        "operationId": "searchKnowledge",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "example": "Requirements for a motion to dismiss for lack of jurisdiction"
+                  },
+                  "jurisdiction": {
+                    "type": "string",
+                    "default": "federal",
+                    "example": "state-ny"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 5
+                  }
+                },
+                "required": ["query"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Relevant legal sections retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VectorQueryResult"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/completions": {
+      "post": {
+        "summary": "OpenAI-Compatible Local Streaming Inference",
+        "description": "Proxy endpoint passing sanitized context and system routing structures directly down to local vLLM or Ollama instances, supporting raw chunked Server-Sent Event (SSE) streaming.",
+        "operationId": "createChatCompletion",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatCompletionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful token chunk stream event collection",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Server-Sent Events streaming chunks of standard OpenAI format ChatCompletionChunk responses."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DocumentIngestResponse": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "raw_text": {
+            "type": "string",
+            "description": "Extracted plaintext from the file framework."
+          },
+          "character_count": {
+            "type": "integer"
+          }
+        },
+        "required": ["document_id", "filename", "raw_text", "character_count"]
+      },
+      "RedactionRequest": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Raw legal brief or case documentation containing sensitive details."
+          }
+        },
+        "required": ["text"]
+      },
+      "RedactionResponse": {
+        "type": "object",
+        "properties": {
+          "sanitized_text": {
+            "type": "string",
+            "description": "Text with PII replaced by safe entity tags."
+          },
+          "entities_found": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "entity_type": {
+                  "type": "string",
+                  "example": "PERSON"
+                },
+                "start": {
+                  "type": "integer"
+                },
+                "end": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "required": ["sanitized_text", "entities_found"]
+      },
+      "VectorQueryResult": {
+        "type": "object",
+        "properties": {
+          "statute_id": {
+            "type": "string"
+          },
+          "citation": {
+            "type": "string",
+            "example": "28 U.S.C. § 1332"
+          },
+          "content": {
+            "type": "string",
+            "description": "The exact provision text found in the vector DB."
+          },
+          "score": {
+            "type": "number",
+            "format": "float",
+            "description": "Cosine similarity match threshold score."
+          }
+        },
+        "required": ["statute_id", "citation", "content", "score"]
+      },
+      "ChatCompletionRequest": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "example": "llama3.3-70b-awq"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": ["system", "user", "assistant"]
+                },
+                "content": {
+                  "type": "string"
+                }
+              },
+              "required": ["role", "content"]
+            }
+          },
+          "temperature": {
+            "type": "number",
+            "default": 0.2
+          },
+          "stream": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": ["model", "messages"]
+      }
+    }
+  }
+}
